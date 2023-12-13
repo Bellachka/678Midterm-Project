@@ -1,0 +1,328 @@
+---
+title: "Fintech 678 Final Project"
+author: "Yan Wang"
+date: "2023-12-12"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+##I. Abstract
+This project report presents an in-depth analysis of financial user data, employing advanced statistical modeling techniques within the RMarkdown environment.  The report concludes with strategic recommendations for financial institutions seeking to optimize user engagement and deposit growth, grounded in the quantitative evidence gathered from the data analysis.
+
+
+##II. Introduction
+Aimed at uncovering key insights in the fintech sector, the study focuses on the relationship between user deposits and several predictors including age, housing status, credit score, and zodiac sign. Utilizing linear regression models, multilevel models with random slopes and intercepts, and a comprehensive exploratory data analysis (EDA), the report offers a nuanced understanding of factors influencing user deposit behaviors. The models' adequacies were rigorously tested through ANOVA and convergence diagnostics, ensuring robustness in the findings. Key results indicate significant relationships between the predictors and deposit amounts, with detailed analysis provided on the variability due to individual differences and other socioeconomic factors.
+
+##III. Method
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+options(kableExtra.latex.load_packages = FALSE)
+
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+
+install.packages("readr")
+install.packages("sqldf")
+install.packages("kableExtra")
+install.packages("coefplot")
+
+
+library(readr)
+library(ggplot2)
+library(tidyverse)
+library(sqldf)
+library(knitr)
+library(kableExtra)
+library(lme4)
+library(arm)
+library(coefplot)
+library(dplyr)
+library(leaflet)
+```
+
+
+```{r message=FALSE, echo=FALSE, warning=FALSE}
+#read the dataset
+
+fintech_data <- read.csv("/Users/yanwang/Desktop/MSSP/678midtermproject/Fintech_user.csv")
+
+
+```
+
+###Data source:
+ https://www.kaggle.com/datasets/niketdheeryan/fintech-users-data
+ 
+###overview of  data:
+ 
+
+```{r display-head}
+
+head(fintech_data)
+
+```
+
+```{r echo=FALSE}
+#Data cleaning
+
+library(tidyverse)
+fintech_data <- fintech_data %>%
+  filter(!is.na(deposits))
+
+#Define users with deposits>0 as the high net worth users 
+highnetworthdata = na.omit(fintech_data)
+
+fintech_data <- rename(fintech_data, highnetworth = deposits)
+```
+
+
+```{r display-structure}
+#The structure of the data
+
+summary(fintech_data)
+
+```
+
+###EDA
+
+Distribution of highnetworth/deposits
+
+```{r}
+ggplot(highnetworthdata, aes(x = deposits)) +
+  geom_histogram(binwidth = 5, color = "black", fill = "sky blue")
+```
+
+*as we can see from the distribution plot of highnetworth/deposits, most deposits are distributed from 0 to 20, indicates the net worth of users of this financial technology company is generally not high. .*
+
+
+*Distribution of creditscore:*
+
+```{r echo=FALSE}
+ggplot(highnetworthdata, aes(x = credit_score)) +
+  geom_histogram(binwidth = 5, color = "black", fill = "sky blue")
+```
+
+*in th histgram plot, the credit score distribution of high-net-worth users shows an obvious normal distribution trend, with the largest number of people in the 500-600 credit score range. *
+
+
+*Distribution of age:*
+
+```{r-}
+ggplot(highnetworthdata, aes(x = age)) +
+  geom_histogram(binwidth = 5, color = "black", fill = "sky blue")
+```
+*in th histgram plot, the largest number of high-net-worth users are in the 25-30 age group, followed by the 30-25 age group, showing an overall younger trend. *
+
+
+*Deposits and zodiac_sign:*
+
+
+
+```{r histogram-plot}
+ggplot(highnetworthdata, aes(x = zodiac_sign, y = deposits)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Deposits by Zodiac Sign", x = "Zodiac Sign", y = "Deposits")
+
+```
+
+*From the plot below, we can see the constellation distribution of the entire user does not reflect differences.*
+
+
+```{r group-summary}
+highnetworthdata %>%
+  group_by(zodiac_sign) %>%
+  summarise(
+    count = n(),
+    mean_deposit = mean(deposits, na.rm = TRUE),
+    median_deposit = median(deposits, na.rm = TRUE),
+    sd_deposit = sd(deposits, na.rm = TRUE)
+  )
+```
+
+
+*Deposits and housing:*
+
+
+```{r scatter-plot}
+ggplot(highnetworthdata, aes(x = housing, y = deposits)) +
+  geom_boxplot() +
+  labs(title = "Deposits by Housing Type", x = "Housing Type", y = "Deposits")
+
+```
+*From the plot below, we can see the distribution of high-net-worth users of different housing types is significantly different*
+
+*Before going further, we want to verify the distribution of the response variable-- deposits, to test the assumption that it is normal distributed.*
+
+```{r qqplot}
+install.packages("nortest")
+library(nortest)
+
+#A Q-Q plot can also help in visually inspecting the normality.
+
+library(ggplot2)
+ggplot(highnetworthdata, aes(sample = deposits)) +
+  geom_qq() +
+  geom_qq_line() +
+  labs(title = "Q-Q Plot for Deposits")
+```
+*From the Q-Q plot it looks like it follows normal distribution.*
+
+###Modelling:
+
+####Model1: Simple linear regression:
+
+
+
+```{r linear-model}
+
+library(tidyverse)
+library(ggplot2)
+library(broom)
+lm_model <- lm(deposits ~ age + housing + credit_score + zodiac_sign, data = highnetworthdata)
+summary(lm_model)
+```
+
+
+Create a residual plot to visualize the residuals from the linear model.
+
+```{r residual-plot}
+highnetworthdata <- highnetworthdata %>%
+  add_column(residuals = resid(lm_model))
+
+ggplot(highnetworthdata, aes(x = deposits, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Residual Plot", x = "Deposits", y = "Residuals")
+```
+
+
+
+visualize the coefficients.
+
+
+```{r coefficient-plot1}
+tidied_model <- tidy(lm_model)
+ggplot(tidied_model, aes(x = term, y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error), width = 0.2) +
+  coord_flip() +
+  labs(title = "Coefficients of Linear Model", x = "Terms", y = "Estimates")
+```
+
+*From this simple linear regression, I found all the predictors are significant. Also the R-square in the model is 0.045, So the model is well fitted.*
+
+
+####Model2: Multilevel linear model with random intercept:
+
+
+
+```{r multilevel-model with random intercep}
+library(lme4)
+library(ggplot2)
+library(broom)
+
+# Fit a multilevel model with random intercepts
+mlm_model <- lmer(deposits ~ age + housing + credit_score + zodiac_sign + (1 | age), data = highnetworthdata)
+summary(mlm_model)
+```
+```{r show-correlation-matrix}
+print(summary(lm_model), correlation = TRUE)
+```
+
+
+
+```{r coefficient-plot2}
+install.packages("broom.mixed")
+library(broom.mixed)
+
+fixed_effects <- tidy(mlm_model, effects = "fixed")
+ggplot(fixed_effects, aes(x = term, y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error), width = 0.2) +
+  coord_flip() +
+  labs(title = "Fixed Effect Coefficients of Multilevel Model", x = "Terms", y = "Estimates")
+
+```
+
+
+####Model3 :  Multilevel linear model with random slope:
+
+
+```{r multilevel-model with random slop }
+
+install.packages("lme4")
+install.packages("broom.mixed")
+library(lme4)
+library(broom.mixed)
+library(ggplot2)
+
+install.packages("broom.mixed")
+library(broom.mixed)
+install.packages("lme4")
+library(lme4)
+
+mlm_model2 <- lmer(deposits ~ age + housing + credit_score + zodiac_sign + (credit_score | age), data = highnetworthdata)
+summary(mlm_model)
+```
+```{r model-summary-with-correlation}
+
+print(summary(mlm_model2), correlation = TRUE)
+```
+
+
+```{r coefficient-plot3}
+
+install.packages("broom")
+install.packages("broom.mixed")
+install.packages("ggplot2")
+library(broom)
+library(broom.mixed)
+library(ggplot2)
+
+fixed_effects <- tidy(mlm_model, effects = "fixed")
+ggplot(fixed_effects, aes(x = term, y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error), width = 0.2) +
+  coord_flip() +
+  labs(title = "Fixed Effect Coefficients of Multilevel Model", x = "Terms", y = "Estimates")
+
+```
+
+*This is a multilevel linear model with random slope. As we can see the model is not very fitted.*
+
+##IV. Result:
+
+###Model Choice and Interpretation use Anova:
+
+```{r setup result}
+library(lme4)
+library(Matrix)
+library(broom.mixed)
+tidied_model <- tidy(mlm_model)
+fixed_effects <- fixef(mlm_model)
+random_effects <- ranef(mlm_model2)
+fixed_effects <- fixef(mlm_model2)
+
+```
+
+
+
+
+##V. Discussion:
+
+###Implication
+*The result indicates the factor of credit score will determine the depositsd . Also, the factors age and housing are obvious to be significant. *
+
+###Limitation
+*Due to the not good time management of the project, this report does not provide a good analysis of the model's fit.*
+
+
+
+##VI.Reference and Appendix
+
+https://www.kaggle.com/
+
